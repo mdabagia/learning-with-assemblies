@@ -1,5 +1,5 @@
-# Weakly Supervised Learning with Assemblies of Neurons
-Code supporting the paper "Weakly Supervised Learning with Assemblies of Neurons", by Dabagia, Papadimitriou, and Vempala [2021].
+# Learning with Assemblies of Neurons
+Code supporting the paper "Assemblies of Neurons Learn to Classify Well-Separated Distributions", by Dabagia, Papadimitriou, and Vempala [COLT 2022].
 
 ## Dependencies
 * NumPy
