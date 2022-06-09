@@ -36,13 +36,25 @@ class BrainArea():
     normalize : bool
         whether to initialize weights as normalized
         
+    input_weights : array of shape (n_inputs, n_neurons)
+    	weights between brain area and input neurons
+    	
+    recurrent_weights : array of shape (n_neurons, n_neurons)
+    	weights between brain area neurons
+    	
+    inputs : array of shape (n_inputs)
+    	current inputs to the brain area
+    	
+    neurons : array of shape (n_neurons)
+    	currently firing neurons in the brain area
+        
     Methods
     -------
-    project(input=None, update=True)
-        Takes input and updates activations to next time step
+    project(input=None)
+        Loads external input to the brain area
         
     step(update=True)
-        Updates activations to next time step without input
+        Updates activations to next time step
         
     read()
         Returns current activations
@@ -86,38 +98,38 @@ class BrainArea():
         self.recurrent_weights = (rng.random((n_neurons, n_neurons)) < density) * 1.
         if normalize:
             self.normalize()
+        self.inputs = np.zeros(n_inputs)
         self.activations = np.zeros(n_neurons)
         
-    def project(self, input=None, update=True):
-        '''Takes input and updates activations to next time step.
-        
-        If no input is passed in, zero input is assumed.
+    def project(self, inputs):
+        '''Loads input to the brain area.
         
         Parameters
         ----------
-        input : ndarray of shape (n_neurons), optional
-            The input to the brain area on the current time step (default is all zeros)
-            
-        update : bool, optional
-            Whether to update the weights based on the resulting activations (default is True)
+        inputs : ndarray of shape (n_neurons)
+            The input to the brain area on the current time step
         '''
-        if input is None:
-            input = np.zeros(self.n_inputs)
-        new_activations = k_cap(input @ self.input_weights + self.activations @ self.recurrent_weights, self.cap_size)
-        
-        self.input_weights[(input[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
-        self.recurrent_weights[(self.activations[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
-        self.activations = new_activations
+
+        self.inputs = inputs
         
     def step(self, update=True):
-        '''Updates activations to next time step without input.
+        '''Updates activations to next time step.
+        
+        Also resets current input to zero after applying it.
         
         Parameters
         ----------
         update : bool, optional
             Whether to update the weights based on the resulting activations (default is True)
         '''
-        self.project(input=None, update=update)
+        new_activations = k_cap(self.inputs @ self.input_weights + self.activations @ self.recurrent_weights, self.cap_size)
+        
+        if update:
+            self.input_weights[(self.inputs[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
+            self.recurrent_weights[(self.activations[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
+
+        self.activations = new_activations
+        self.inputs = np.zeros(self.n_inputs)
         
     def read(self):
         '''Returns current activations.
@@ -125,8 +137,9 @@ class BrainArea():
         return self.activations
     
     def reset(self):
-        '''Sets current activations to zero.
+        '''Sets current activations and inputs to zero.
         '''
+        self.inputs = np.zeros(self.n_inputs)
         self.activations = np.zeros(self.n_neurons)
     
     def normalize(self):
