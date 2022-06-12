@@ -33,7 +33,7 @@ class BrainArea():
     plasticity : float
         strength of the Hebbian update
         
-    normalize : bool
+    norm_init : bool
         whether to initialize weights as normalized
         
     n_input_areas : int
@@ -48,8 +48,8 @@ class BrainArea():
     inputs : array of shape (n_inputs)
     	current inputs to the brain area
     	
-    neurons : array of shape (n_neurons)
-    	currently firing neurons in the brain area
+    activations : array of shape (ref_period, n_neurons)
+    	firing patterns in the brain area over the last ref_period rounds, with activations[0] the most recent
         
     Methods
     -------
@@ -76,7 +76,7 @@ class BrainArea():
         Resets weights, activations, and inputs
     '''
     
-    def __init__(self, n_inputs, n_neurons, cap_size, density, plasticity=1e-1, normalize=False):
+    def __init__(self, n_inputs, n_neurons, cap_size, density, plasticity=1e-1, norm_init=False, refraction=False, ref_period=2, ref_penalty=1e2):
         '''
         Parameters
         ----------
@@ -95,8 +95,17 @@ class BrainArea():
         plasticity : float, optional
             strength of the Hebbian update (default is 0.1)
 
-        normalize : bool, optional
+        norm_init : bool, optional
             whether to initialize weights as normalized (default is False)
+            
+        refraction : bool, optional
+            whether to penalize neurons for firing too many times consecutively (default is False)
+            
+        ref_period : int, optional
+            the number of rounds a neuron may fire consecutively before being penalized (default is 2)
+            
+        ref_penalty : float, optional
+            the refractory penalty (default is 100)
         '''
         if isinstance(n_inputs, int):
             self.n_input_areas = 1
@@ -108,6 +117,11 @@ class BrainArea():
         self.cap_size = cap_size
         self.density = density
         self.plasticity = plasticity
+        self.norm_init = norm_init
+        self.refraction = refraction
+        self.ref_period = ref_period
+        self.penalty = ref_penalty
+        self.bias = np.zeros(n_neurons)
         self.reset()
         
     def set_input(self, inputs, input_area=0):
@@ -139,20 +153,23 @@ class BrainArea():
         update : bool, optional
             Whether to update the weights based on the resulting activations (default is True)
         '''
-        new_activations = k_cap(np.sum([self.inputs[i] @ self.input_weights[i] for i in range(self.n_input_areas)], axis=0) + self.activations @ self.recurrent_weights, self.cap_size)
+        if self.refraction:
+            self.bias -= self.penalty * np.all(self.activations[:-1] > 0, axis=0)
+
+        self.activations[1:] = self.activations[:-1]
+        self.activations[0] = k_cap(np.sum([self.inputs[i] @ self.input_weights[i] for i in range(self.n_input_areas)], axis=0) + self.activations[1] @ self.recurrent_weights + self.bias, self.cap_size)
         
         if update:
             for w, inp in zip(self.input_weights, self.inputs):
-                w[(inp[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
-            self.recurrent_weights[(self.activations[:, np.newaxis] > 0) & (new_activations[np.newaxis] > 0)] *= 1 + self.plasticity
+                w[(inp[:, np.newaxis] > 0) & (self.activations[0][np.newaxis] > 0)] *= 1 + self.plasticity
+            self.recurrent_weights[(self.activations[1][:, np.newaxis] > 0) & (self.activations[0][np.newaxis] > 0)] *= 1 + self.plasticity
 
-        self.activations = new_activations
         self.inputs = [np.zeros(n) for n in self.n_inputs]
         
     def read(self):
         '''Returns current activations.
         '''
-        return self.activations.copy()
+        return self.activations[0].copy()
     
     def fire(self, activations, update=True):
         '''Manually fires neurons to match the given pattern.
@@ -168,8 +185,9 @@ class BrainArea():
         if update:
             for w, inp in zip(self.input_weights, self.inputs):
                 w[(inp[:, np.newaxis] > 0) & (activations[np.newaxis] > 0)] *= 1 + self.plasticity
-            self.recurrent_weights[(self.activations[:, np.newaxis] > 0) & (activations[np.newaxis] > 0)] *= 1 + self.plasticity
-        self.activations = activations
+            self.recurrent_weights[(self.activations[0][:, np.newaxis] > 0) & (activations[np.newaxis] > 0)] *= 1 + self.plasticity
+        self.activations[1:] = self.activations[:-1]
+        self.activations[0] = activations
         self.inputs = [np.zeros(n) for n in self.n_inputs]
         
 
@@ -177,7 +195,8 @@ class BrainArea():
         '''Sets current activations and inputs to zero.
         '''
         self.inputs = [np.zeros(n) for n in self.n_inputs]
-        self.activations = np.zeros(self.n_neurons)
+        self.activations = np.zeros((self.ref_period+1, self.n_neurons))
+        self.bias = np.zeros(self.n_neurons)
     
     def normalize(self):
         '''Normalizes current incoming weights of each neuron to unit sum.
@@ -193,5 +212,5 @@ class BrainArea():
         self.input_weights = [(rng.random((n, self.n_neurons)) < self.density) * 1. for n in self.n_inputs]
         self.recurrent_weights = (rng.random((self.n_neurons, self.n_neurons)) < self.density) * 1.
         self.inhibit()
-        if self.normalize:
+        if self.norm_init:
             self.normalize()
