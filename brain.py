@@ -143,7 +143,7 @@ class RandomChoiceArea(RecurrentArea):
             self.fire(assm)
         self.inhibit()
         
-    def flip(self, n_rounds=10):
+    def flip(self, n_rounds=15):
         self.inhibit()
         self.fire(rng.choice(self.n_neurons, size=self.cap_size, replace=False), update=False)
         for _ in range(n_rounds):
@@ -292,6 +292,11 @@ class PFANetwork():
         self.random_area = RandomChoiceArea(n_random_neurons, cap_size, density, plasticity)
         self.cap_size = cap_size
         self.random_area.train([np.arange(cap_size), np.arange(cap_size, 2 * cap_size)])
+        
+    def inhibit(self):
+        self.symbol_area.inhibit()
+        self.state_area.inhibit()
+        self.arc_area.inhibit()
         
     def train(self, state, rand, new_state, symbol):
         self.arc_area.forward([state, np.arange(rand*self.cap_size, (rand+1)*self.cap_size)])
