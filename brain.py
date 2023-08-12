@@ -2,12 +2,14 @@ import numpy as np
 rng = np.random.default_rng()
 
 def k_cap(input, cap_size):
-    if np.all(input == 0):
+    if np.all(input <= 0):
         return []
     else:
         return input.argsort(axis=-1)[...,-cap_size:]
 
 def idx_to_vec(idx, shape):
+    if len(idx) == 0:
+        return np.zeros(shape)
     vec = np.zeros(idx.shape[:-1] + (shape,))
     np.put_along_axis(vec, idx, 1, axis=-1)
     return vec
@@ -209,6 +211,79 @@ class FSMNetwork():
         self.state_area.set_input(self.arc_area.read())
         self.state_area.fire(new_state)
         
+class SequenceMemoryNetwork():
+    def __init__(self, memory_length, n_input_neurons, n_arc_neurons, cap_size, density, plasticity, norm_init=False):
+        self.input_area = FFArea(n_arc_neurons, n_input_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.memory_areas = [RefractedArea(n_input_neurons, n_input_neurons, cap_size, density, 0., norm_init=norm_init) for _ in range(memory_length-1)]
+        self.arc_area = RefractedArea([n_input_neurons] * memory_length, n_arc_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.memory_length = memory_length
+        
+    def reset(self):
+        self.input_area.reset()
+        for area in self.memory_areas:
+            area.reset()
+        self.arc_area.reset()
+        
+    def inhibit(self):
+        self.input_area.inhibit()
+        for area in self.memory_areas:
+            area.inhibit()
+        self.arc_area.inhibit()
+        
+    def forward(self, inputs, update=True):        
+        self.input_area.set_input(self.arc_area.read())
+        self.arc_area.forward([self.input_area.read()] + [a.read() for a in self.memory_areas], update=update)
+        for i in range(self.memory_length-1, 0):
+            self.memory_areas[i].forward(self.memory_areas[i-1].read(), update=update)
+        self.memory_areas[0].forward(self.input_area.read(), update=update)
+
+        self.input_area.fire(inputs, update=update)
+    
+    def step(self, update=True):
+        self.input_area.set_input(self.arc_area.read())
+        self.arc_area.forward([self.input_area.read()] + [a.read() for a in self.memory_areas], update=update)
+        for i in range(self.memory_length-1, 0):
+            self.memory_areas[i].forward(self.memory_areas[i-1].read(), update=update)
+        self.memory_areas[0].forward(self.input_area.read(), update=update)
+
+        self.input_area.step(update=update)
+        
+class TuringHeadNetwork():
+    def __init__(self, n_symbol_neurons, n_state_neurons, n_arc_neurons, n_move_neurons, cap_size, density, plasticity, norm_init=False):
+        self.write_area = FFArea(n_arc_neurons, n_symbol_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.move_area = FFArea(n_arc_neurons, n_move_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.state_area = FFArea(n_arc_neurons, n_state_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.arc_area = RefractedArea([n_state_neurons, n_symbol_neurons], n_arc_neurons, cap_size, density, plasticity, norm_init=norm_init)
+        self.areas = [self.write_area, self.move_area, self.state_area, self.arc_area]
+        
+    def reset(self):
+        for area in self.areas:
+            area.reset()
+            
+    def inhibit(self):
+        for area in self.areas:
+            area.inhibit()
+            
+    def read(self, dense=False):
+        return self.write_area.read(dense=dense), self.move_area.read(dense=dense)
+    
+    def train(self, state, symbol, new_state, new_symbol, direction):
+        self.inhibit()
+        self.arc_area.forward([state, symbol])
+        self.state_area.set_input(self.arc_area.read())
+        self.write_area.set_input(self.arc_area.read())
+        self.move_area.set_input(self.arc_area.read())
+        self.state_area.fire(new_state)
+        self.write_area.fire(new_symbol)
+        self.move_area.fire(direction)
+        
+    def forward(self, symbol, update=True):
+        self.arc_area.forward([self.state_area.read(), symbol], update=update)
+        self.state_area.forward(self.arc_area.read(), update=update)
+        self.write_area.forward(self.arc_area.read(), update=update)
+        self.move_area.forward(self.arc_area.read(), update=update)
+        
+        
 class PFANetwork():
     def __init__(self, n_symbol_neurons, n_state_neurons, n_arc_neurons, n_random_neurons, cap_size, density, plasticity, norm_init=False):
         self.symbol_area = FFArea(n_arc_neurons, n_symbol_neurons, cap_size, density, plasticity, norm_init=norm_init)
@@ -232,3 +307,25 @@ class PFANetwork():
         
     def read(self, dense=False):
         return self.symbol_area.read(dense=dense)
+    
+class ExternalTape():
+    def __init__(self, init=[]):
+        self.tape = [0] + init + [0]
+        self.position = 1
+        
+    def read(self):
+        return self.tape[self.position]
+    
+    def write(self, symbol):
+        self.tape[self.position] = symbol
+        
+    def move(self, direction):
+        self.position += direction
+        if self.position == 0:
+            self.tape = [0] + self.tape
+            self.position += 1
+        if self.position == len(self.tape) - 1:
+            self.tape += [0]
+                 
+    def dump(self):
+        return self.tape[:]
